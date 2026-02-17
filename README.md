@@ -15,9 +15,14 @@
 
 # 🔐 IAM Requirements 🔐
 
-Before using this module, you need to create IAM roles in both accounts.
+## Requester Account (`XXXXXXXX`) — Optional
 
-## Requester Account (`XXXXXXXX`)
+> **`requester_aws_assume_role_arn` is optional.** If Terraform runs under an IAM user or role that already has sufficient EC2 permissions in the requester account (e.g. `AdministratorAccess` or a custom policy), you do **not** need to create a separate role — just omit this variable and the provider will use your current credentials directly.
+
+A separate requester role is only needed if:
+* Terraform runs under a CI/CD identity that doesn't have EC2 peering permissions yet, and you want to scope permissions via assume role.
+
+If you do need a requester role, here are the required policies:
 
 ### Role Trust Policy
 ```json
@@ -90,7 +95,9 @@ Before using this module, you need to create IAM roles in both accounts.
 
 ---
 
-## Accepter Account (`YYYYYYYY`)
+## Accepter Account (`YYYYYYYY`) — Required
+
+Since Terraform runs in the requester account, it has no access to the accepter account by default. You **must** create an IAM role in the accepter account and pass its ARN as `accepter_aws_assume_role_arn`.
 
 ### Role Trust Policy
 Allow the requester account to assume this role:
@@ -164,3 +171,59 @@ Allow the requester account to assume this role:
 
 > Replace `YYYYYYYY` with the **accepter** account ID.
 
+---
+
+# 🚀 Usage Examples (Terragrunt) 🚀
+
+## Without requester role (most common case)
+If you run Terraform under a user/role that already has access to the requester account:
+
+```hcl
+# terragrunt.hcl
+inputs = {
+  name = "prod-to-shared"
+
+  # Requester (Account A) - no assume_role_arn needed!
+  requester_region = "us-east-1"
+  requester_vpc_id = dependency.vpc.outputs.vpc_id
+
+  # Accepter (Account B) - role required, no direct access
+  accepter_region              = "us-east-1"
+  accepter_aws_assume_role_arn = "arn:aws:iam::222222222222:role/VPCPeeringAccepterRole"
+  accepter_vpc_id              = "vpc-0000000000000000"
+
+  auto_accept = true
+
+  tags = {
+    Environment = "production"
+    ManagedBy   = "terragrunt"
+  }
+}
+```
+
+## With requester role (CI/CD case)
+If Terraform runs under a CI/CD identity that assumes a scoped role:
+
+```hcl
+# terragrunt.hcl
+inputs = {
+  name = "prod-to-shared"
+
+  # Requester (Account A) - explicit assume role for CI/CD
+  requester_region              = "us-east-1"
+  requester_aws_assume_role_arn = "arn:aws:iam::111111111111:role/VPCPeeringRequesterRole"
+  requester_vpc_id              = dependency.vpc.outputs.vpc_id
+
+  # Accepter (Account B)
+  accepter_region              = "us-east-1"
+  accepter_aws_assume_role_arn = "arn:aws:iam::222222222222:role/VPCPeeringAccepterRole"
+  accepter_vpc_id              = "vpc-0000000000000000"
+
+  auto_accept = true
+
+  tags = {
+    Environment = "production"
+    ManagedBy   = "terragrunt"
+  }
+}
+```
